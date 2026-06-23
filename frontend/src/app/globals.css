@@ -1,0 +1,153 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 4%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 4%;
+
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 20%;
+
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 46%;
+
+    --accent: 262 60% 96%;
+    --accent-foreground: 262 60% 30%;
+
+    --destructive: 346 84% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 76% 42%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 240 6% 20%;
+
+    --border: 240 6% 92%;
+    --input: 240 6% 90%;
+    --ring: 262 83% 58%;
+
+    --chart-1: 262 83% 58%;
+    --chart-2: 173 80% 40%;
+    --chart-3: 152 76% 42%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 346 84% 55%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 240 10% 3.5%;
+    --foreground: 0 0% 98%;
+    --card: 240 9% 6%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 9% 6%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 263 75% 68%;
+    --primary-foreground: 240 10% 4%;
+
+    --secondary: 240 4% 12%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 4% 11%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 263 45% 18%;
+    --accent-foreground: 263 60% 85%;
+
+    --destructive: 346 84% 62%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 152 70% 55%;
+    --success-foreground: 240 10% 4%;
+
+    --warning: 38 92% 60%;
+    --warning-foreground: 240 10% 4%;
+
+    --border: 240 4% 14%;
+    --input: 240 4% 14%;
+    --ring: 263 75% 68%;
+
+    --chart-1: 263 75% 68%;
+    --chart-2: 174 62% 55%;
+    --chart-3: 152 70% 55%;
+    --chart-4: 38 92% 60%;
+    --chart-5: 346 84% 62%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Subtle ambient background gradient in dark mode */
+  .dark body {
+    background-image: radial-gradient(
+      ellipse 80% 60% at 50% -20%,
+      hsl(263 75% 20% / 0.35),
+      transparent
+    );
+  }
+}
+
+@layer utilities {
+  .gradient-brand {
+    background-image: linear-gradient(135deg, hsl(var(--chart-1)), hsl(var(--chart-2)));
+  }
+  .text-gradient-brand {
+    background-image: linear-gradient(135deg, hsl(var(--chart-1)), hsl(var(--chart-2)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+/* --- Theme toggle: circular reveal via View Transitions API --- */
+@supports (view-transition-name: root) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+  }
+
+  ::view-transition-old(root) {
+    z-index: 1;
+  }
+
+  ::view-transition-new(root) {
+    z-index: 2147483646;
+    animation: theme-reveal 1000ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  @keyframes theme-reveal {
+    from {
+      clip-path: circle(0 at var(--reveal-x, 50%) var(--reveal-y, 50%));
+    }
+    to {
+      clip-path: circle(var(--reveal-r, 150vmax) at var(--reveal-x, 50%) var(--reveal-y, 50%));
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+}
