@@ -2,27 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Awaitable, Callable, Iterable, TypeVar
+from typing import Iterable
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import AsyncSessionLocal
 from app.models import Customer, CustomerStatus, RevenueEvent, RevenueEventType
-
-T = TypeVar("T")
-
-
-async def _in_fresh_session(fn: Callable[..., Awaitable[T]], *args) -> T:
-    """Run `fn(session, *args)` on its own connection so multiple calls can run
-    concurrently under `asyncio.gather` — a single AsyncSession is not safe to
-    share between concurrent tasks (each query blocks the underlying connection)."""
-    async with AsyncSessionLocal() as s:
-        return await fn(s, *args)
 
 
 # ---------- helpers ----------
@@ -65,45 +53,30 @@ def add_quarters(d: date, n: int) -> date:
     return add_months(d, n * 3)
 
 
-# ---------- point-in-time state ----------
-
-
-async def mrr_as_of(db: AsyncSession, as_of: date) -> Decimal:
-    """Net MRR at end-of-day `as_of`, derived from cumulative event amounts."""
-    stmt = select(func.coalesce(func.sum(RevenueEvent.amount), 0)).where(
-        RevenueEvent.event_date <= as_of
-    )
-    return Decimal(str((await db.execute(stmt)).scalar_one()))
-
-
-async def active_subs_as_of(db: AsyncSession, as_of: date) -> int:
-    """Distinct customers who had a `new` event by `as_of` and no `churn` event by then."""
-    churned_subq = (
-        select(RevenueEvent.customer_id)
-        .where(RevenueEvent.event_type == RevenueEventType.churn)
-        .where(RevenueEvent.event_date <= as_of)
-    )
-    stmt = (
-        select(func.count(distinct(RevenueEvent.customer_id)))
-        .where(RevenueEvent.event_type == RevenueEventType.new)
-        .where(RevenueEvent.event_date <= as_of)
-        .where(RevenueEvent.customer_id.not_in(churned_subq))
-    )
-    return int((await db.execute(stmt)).scalar_one() or 0)
-
-
-async def churn_count_in_range(db: AsyncSession, start: date, end: date) -> int:
-    stmt = (
-        select(func.count())
-        .select_from(RevenueEvent)
-        .where(RevenueEvent.event_type == RevenueEventType.churn)
-        .where(RevenueEvent.event_date > start)
-        .where(RevenueEvent.event_date <= end)
-    )
-    return int((await db.execute(stmt)).scalar_one() or 0)
-
-
 # ---------- KPI aggregation ----------
+
+
+_KPI_SQL = text(
+    """
+    WITH per_customer AS (
+        SELECT
+            customer_id,
+            MIN(event_date) FILTER (WHERE event_type = 'new')   AS signup_date,
+            MIN(event_date) FILTER (WHERE event_type = 'churn') AS churn_date
+        FROM revenue_events
+        GROUP BY customer_id
+    )
+    SELECT
+        COALESCE(SUM(amount) FILTER (WHERE event_date <= :t_now),   0) AS mrr_now,
+        COALESCE(SUM(amount) FILTER (WHERE event_date <= :t_start), 0) AS mrr_past,
+        COUNT(*) FILTER (WHERE event_type = 'churn' AND event_date >  :t_start AND event_date <= :t_now)  AS churn_now,
+        COUNT(*) FILTER (WHERE event_type = 'churn' AND event_date >  :t_prev  AND event_date <= :t_start) AS churn_prev,
+        (SELECT COUNT(*) FROM per_customer WHERE signup_date <= :t_now   AND (churn_date IS NULL OR churn_date > :t_now))   AS subs_now,
+        (SELECT COUNT(*) FROM per_customer WHERE signup_date <= :t_start AND (churn_date IS NULL OR churn_date > :t_start)) AS subs_past,
+        (SELECT COUNT(*) FROM per_customer WHERE signup_date <= :t_prev  AND (churn_date IS NULL OR churn_date > :t_prev))  AS subs_prev
+    FROM revenue_events
+    """
+)
 
 
 async def compute_kpis(db: AsyncSession, period_days: int, today: date | None = None) -> dict:
@@ -111,25 +84,18 @@ async def compute_kpis(db: AsyncSession, period_days: int, today: date | None = 
     period_start = today - timedelta(days=period_days)
     prev_start = period_start - timedelta(days=period_days)
 
-    (
-        current_mrr_d,
-        past_mrr_d,
-        current_subs,
-        past_subs,
-        churn_now,
-        churn_prev,
-        subs_at_prev_start,
-    ) = await asyncio.gather(
-        _in_fresh_session(mrr_as_of, today),
-        _in_fresh_session(mrr_as_of, period_start),
-        _in_fresh_session(active_subs_as_of, today),
-        _in_fresh_session(active_subs_as_of, period_start),
-        _in_fresh_session(churn_count_in_range, period_start, today),
-        _in_fresh_session(churn_count_in_range, prev_start, period_start),
-        _in_fresh_session(active_subs_as_of, prev_start),
-    )
-    current_mrr = float(current_mrr_d)
-    past_mrr = float(past_mrr_d)
+    row = (
+        await db.execute(
+            _KPI_SQL, {"t_now": today, "t_start": period_start, "t_prev": prev_start}
+        )
+    ).one()
+    current_mrr = float(row.mrr_now)
+    past_mrr = float(row.mrr_past)
+    current_subs = int(row.subs_now)
+    past_subs = int(row.subs_past)
+    subs_at_prev_start = int(row.subs_prev)
+    churn_now = int(row.churn_now)
+    churn_prev = int(row.churn_prev)
     subs_at_period_start = past_subs
 
     churn_rate = (churn_now / subs_at_period_start * 100) if subs_at_period_start else 0.0
@@ -335,24 +301,21 @@ async def compute_cohorts(
     floor = month_floor if granularity == "monthly" else quarter_floor
     step = add_months if granularity == "monthly" else add_quarters
 
-    async def _fetch_signups(s: AsyncSession):
-        return (await s.execute(select(Customer.id, Customer.signup_date))).all()
-
-    async def _fetch_churn(s: AsyncSession):
-        return (
-            await s.execute(
-                select(RevenueEvent.customer_id, RevenueEvent.event_date).where(
-                    RevenueEvent.event_type == RevenueEventType.churn
-                )
+    rows = (
+        await db.execute(
+            text(
+                """
+                SELECT c.id, c.signup_date, MIN(e.event_date) AS churn_date
+                FROM customers c
+                LEFT JOIN revenue_events e
+                  ON e.customer_id = c.id AND e.event_type = 'churn'
+                GROUP BY c.id, c.signup_date
+                """
             )
-        ).all()
-
-    signup_rows, churn_rows = await asyncio.gather(
-        _in_fresh_session(_fetch_signups),
-        _in_fresh_session(_fetch_churn),
-    )
-    signups = {cid: signup for cid, signup in signup_rows}
-    churn_dates: dict = {cid: cd for cid, cd in churn_rows}
+        )
+    ).all()
+    signups = {r.id: r.signup_date for r in rows}
+    churn_dates: dict = {r.id: r.churn_date for r in rows if r.churn_date is not None}
 
     cohorts: dict[date, list[tuple[date, date | None]]] = defaultdict(list)
     for cid, signup in signups.items():
