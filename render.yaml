@@ -18,9 +18,9 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: FRONTEND_URL
-        value: https://pulse.buildloop.fyi
+        value: https://pulse-drab-mu.vercel.app
       - key: CORS_ORIGINS
-        value: https://pulse.buildloop.fyi
+        value: https://pulse-drab-mu.vercel.app
       - key: DEMO_EMAIL
         value: demo@pulse.app
       - key: DEMO_PASSWORD
@@ -32,4 +32,4 @@ services:
       - key: GOOGLE_CLIENT_SECRET
         sync: false
       - key: GOOGLE_REDIRECT_URI
-        value: https://api.pulse.buildloop.fyi/api/auth/google/callback
+        value: https://pulse-api-nuc3.onrender.com/api/auth/google/callback
