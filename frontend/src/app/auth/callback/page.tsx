@@ -2,11 +2,11 @@
 
 import { Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 
 import { setToken } from "@/lib/api";
 
-export default function AuthCallbackPage() {
+function AuthCallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -25,5 +25,20 @@ export default function AuthCallbackPage() {
       <Loader2 className="h-5 w-5 animate-spin" />
       <span>Completing sign-in…</span>
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center gap-2 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span>Completing sign-in…</span>
+        </div>
+      }
+    >
+      <AuthCallbackInner />
+    </Suspense>
   );
 }
