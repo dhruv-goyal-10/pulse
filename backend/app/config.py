@@ -1,7 +1,18 @@
 from functools import lru_cache
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _normalize_async_pg_url(url: str) -> str:
+    """Coerce a plain Postgres URL (like the one Neon/Render/Heroku hand out) into the
+    asyncpg-flavored form SQLAlchemy expects, and translate `sslmode=require` (libpq) to
+    `ssl=require` (asyncpg)."""
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+    return url.replace("sslmode=require", "ssl=require")
 
 
 class Settings(BaseSettings):
@@ -10,7 +21,11 @@ class Settings(BaseSettings):
     app_env: str = "development"
 
     database_url: str = "postgresql+asyncpg://pulse:pulse@localhost:5432/pulse"
-    database_url_sync: str = "postgresql+psycopg2://pulse:pulse@localhost:5432/pulse"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _coerce_db_url(cls, v: str) -> str:
+        return _normalize_async_pg_url(v)
 
     jwt_secret_key: str = "dev-only-change-me"
     jwt_algorithm: str = "HS256"

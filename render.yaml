@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: pulse-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: FRONTEND_URL
+        value: https://pulse.buildloop.fyi
+      - key: CORS_ORIGINS
+        value: https://pulse.buildloop.fyi
+      - key: DEMO_EMAIL
+        value: demo@pulse.app
+      - key: DEMO_PASSWORD
+        value: demo123
+      - key: DEMO_NAME
+        value: Demo Admin
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: https://api.pulse.buildloop.fyi/api/auth/google/callback
