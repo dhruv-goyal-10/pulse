@@ -6,13 +6,26 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def _normalize_async_pg_url(url: str) -> str:
     """Coerce a plain Postgres URL (like the one Neon/Render/Heroku hand out) into the
-    asyncpg-flavored form SQLAlchemy expects, and translate `sslmode=require` (libpq) to
-    `ssl=require` (asyncpg)."""
+    asyncpg-flavored form SQLAlchemy expects. Translates libpq-style query params
+    (`sslmode`, `channel_binding`) into what asyncpg accepts and drops ones it rejects."""
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
     if url.startswith("postgresql://"):
         url = "postgresql+asyncpg://" + url[len("postgresql://"):]
-    return url.replace("sslmode=require", "ssl=require")
+
+    parts = urlsplit(url)
+    kept: list[tuple[str, str]] = []
+    for k, v in parse_qsl(parts.query, keep_blank_values=True):
+        if k == "sslmode":
+            kept.append(("ssl", v))
+        elif k == "channel_binding":
+            # asyncpg doesn't accept this kwarg; it negotiates channel binding itself.
+            continue
+        else:
+            kept.append((k, v))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
 
 
 class Settings(BaseSettings):
