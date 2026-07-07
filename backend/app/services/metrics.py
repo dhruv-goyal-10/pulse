@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Iterable
+from typing import Awaitable, Callable, Iterable, TypeVar
 
 from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import AsyncSessionLocal
 from app.models import Customer, CustomerStatus, RevenueEvent, RevenueEventType
+
+T = TypeVar("T")
+
+
+async def _in_fresh_session(fn: Callable[..., Awaitable[T]], *args) -> T:
+    """Run `fn(session, *args)` on its own connection so multiple calls can run
+    concurrently under `asyncio.gather` — a single AsyncSession is not safe to
+    share between concurrent tasks (each query blocks the underlying connection)."""
+    async with AsyncSessionLocal() as s:
+        return await fn(s, *args)
 
 
 # ---------- helpers ----------
@@ -99,16 +111,26 @@ async def compute_kpis(db: AsyncSession, period_days: int, today: date | None = 
     period_start = today - timedelta(days=period_days)
     prev_start = period_start - timedelta(days=period_days)
 
-    current_mrr = float(await mrr_as_of(db, today))
-    past_mrr = float(await mrr_as_of(db, period_start))
-
-    current_subs = await active_subs_as_of(db, today)
-    past_subs = await active_subs_as_of(db, period_start)
-
-    churn_now = await churn_count_in_range(db, period_start, today)
-    churn_prev = await churn_count_in_range(db, prev_start, period_start)
+    (
+        current_mrr_d,
+        past_mrr_d,
+        current_subs,
+        past_subs,
+        churn_now,
+        churn_prev,
+        subs_at_prev_start,
+    ) = await asyncio.gather(
+        _in_fresh_session(mrr_as_of, today),
+        _in_fresh_session(mrr_as_of, period_start),
+        _in_fresh_session(active_subs_as_of, today),
+        _in_fresh_session(active_subs_as_of, period_start),
+        _in_fresh_session(churn_count_in_range, period_start, today),
+        _in_fresh_session(churn_count_in_range, prev_start, period_start),
+        _in_fresh_session(active_subs_as_of, prev_start),
+    )
+    current_mrr = float(current_mrr_d)
+    past_mrr = float(past_mrr_d)
     subs_at_period_start = past_subs
-    subs_at_prev_start = await active_subs_as_of(db, prev_start)
 
     churn_rate = (churn_now / subs_at_period_start * 100) if subs_at_period_start else 0.0
     prev_churn_rate = (churn_prev / subs_at_prev_start * 100) if subs_at_prev_start else 0.0
@@ -313,13 +335,24 @@ async def compute_cohorts(
     floor = month_floor if granularity == "monthly" else quarter_floor
     step = add_months if granularity == "monthly" else add_quarters
 
-    signups_stmt = select(Customer.id, Customer.signup_date)
-    signups = {cid: signup for cid, signup in (await db.execute(signups_stmt)).all()}
+    async def _fetch_signups(s: AsyncSession):
+        return (await s.execute(select(Customer.id, Customer.signup_date))).all()
 
-    churn_stmt = select(RevenueEvent.customer_id, RevenueEvent.event_date).where(
-        RevenueEvent.event_type == RevenueEventType.churn
+    async def _fetch_churn(s: AsyncSession):
+        return (
+            await s.execute(
+                select(RevenueEvent.customer_id, RevenueEvent.event_date).where(
+                    RevenueEvent.event_type == RevenueEventType.churn
+                )
+            )
+        ).all()
+
+    signup_rows, churn_rows = await asyncio.gather(
+        _in_fresh_session(_fetch_signups),
+        _in_fresh_session(_fetch_churn),
     )
-    churn_dates: dict = {cid: cd for cid, cd in (await db.execute(churn_stmt)).all()}
+    signups = {cid: signup for cid, signup in signup_rows}
+    churn_dates: dict = {cid: cd for cid, cd in churn_rows}
 
     cohorts: dict[date, list[tuple[date, date | None]]] = defaultdict(list)
     for cid, signup in signups.items():
