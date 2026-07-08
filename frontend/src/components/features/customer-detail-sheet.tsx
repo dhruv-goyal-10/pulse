@@ -72,9 +72,9 @@ export function CustomerDetailSheet({ customerId, open, onOpenChange }: Props) {
             <div>
               <div className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Revenue history</div>
               <div className="h-40 w-full rounded-md border p-2">
-                {chartReady && (
+                {chartReady && history && (
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={history ?? []}>
+                    <LineChart data={history}>
                       <XAxis dataKey="event_date" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(d) => formatDate(d, { month: "short", day: "numeric" })} />
                       <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(v) => `$${v}`} width={40} />
                       <Tooltip formatter={(v: number) => formatCurrency(v)} />
