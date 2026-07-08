@@ -38,7 +38,6 @@ export function RevenueChart() {
   const { data, isLoading, isFetching } = useQuery<RevenueTimeseriesResponse>({
     queryKey: ["revenue-timeseries", from, to],
     queryFn: () => api<RevenueTimeseriesResponse>("/metrics/revenue-timeseries", { query: { from, to } }),
-    placeholderData: (prev) => prev,
   });
 
   const points = data?.points ?? [];

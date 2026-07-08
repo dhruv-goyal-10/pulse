@@ -69,7 +69,6 @@ export function MrrWaterfall() {
   const { data, isLoading, isFetching } = useQuery<MrrMovementResponse>({
     queryKey: ["mrr-movement", from, to],
     queryFn: () => api<MrrMovementResponse>("/metrics/mrr-movement", { query: { from, to } }),
-    placeholderData: (prev) => prev,
   });
 
   const bars = data
